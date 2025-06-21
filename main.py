@@ -9,7 +9,7 @@ bot = telebot.TeleBot(TOKEN)
 user_balances = {}
 user_games = {}
 ADMIN_ID = 5815294733
-withdraw_sessions = {}  # admin sessionlari uchun
+withdraw_sessions = {}
 
 @bot.message_handler(commands=['start'])
 def start(message):
@@ -17,7 +17,12 @@ def start(message):
     user_balances.setdefault(user_id, 1000)
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add('Balance', 'Play Mines')
-    markup.add('Pay')
+
+    if user_id == ADMIN_ID:
+        markup.add('Hisob to‘ldirish', 'Mablag‘ chiqarish')
+    else:
+        markup.add('Hisob to‘ldirish', 'Hisob yechish')
+
     bot.send_message(message.chat.id, "Xush kelibsiz! Mines o‘yinini boshlang!", reply_markup=markup)
 
 @bot.message_handler(func=lambda m: m.text == "Balance")
@@ -122,7 +127,7 @@ def handle_callback(call):
         game['multiplier'] *= 1.08
         send_mines_board(call.message.chat.id, user_id, bomb_triggered=False)
 
-@bot.message_handler(func=lambda m: m.text == "Pay")
+@bot.message_handler(func=lambda m: m.text == "Hisob to‘ldirish")
 def pay(message):
     if message.from_user.id != ADMIN_ID:
         bot.send_message(message.chat.id, "shu odamga murojat qilinglar @for_X_bott")
@@ -146,18 +151,64 @@ def add_balance(message, user_id):
     except ValueError:
         bot.send_message(message.chat.id, "Miqdor noto‘g‘ri.")
 
+@bot.message_handler(func=lambda m: m.text == "Mablag‘ chiqarish")
+def withdraw_admin_button(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    withdraw_command(message)
+
+@bot.message_handler(func=lambda m: m.text == "Hisob yechish")
+def request_withdrawal(message):
+    user_id = message.from_user.id
+    msg = bot.send_message(message.chat.id, "Qancha pul yechmoqchisiz?")
+    bot.register_next_step_handler(msg, lambda m: send_withdraw_request(m, user_id))
+
+def send_withdraw_request(message, user_id):
+    try:
+        amount = int(message.text)
+        balance = user_balances.get(user_id, 0)
+
+        if amount > balance:
+            bot.send_message(message.chat.id, "Balansingizda bu miqdorda pul yo‘q.")
+            return
+
+        bot.send_message(
+            ADMIN_ID,
+            f"💸 Yangi yechish so‘rovi!\nID: {user_id}\nMiqdor: {amount} so‘m\n\n/to'la_{user_id}_{amount}"
+        )
+        bot.send_message(message.chat.id, "So‘rovingiz adminga yuborildi. Tez orada ko‘rib chiqiladi.")
+    except ValueError:
+        bot.send_message(message.chat.id, "Faqat raqam kiriting.")
+
+@bot.message_handler(commands=['to\'la'])
+def confirm_withdraw_from_command(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    try:
+        parts = message.text.split("_")
+        user_id = int(parts[1])
+        amount = int(parts[2])
+        if user_balances.get(user_id, 0) < amount:
+            bot.send_message(message.chat.id, "Foydalanuvchida yetarli mablag‘ yo‘q.")
+            return
+        user_balances[user_id] -= amount
+        bot.send_message(message.chat.id, f"{user_id} ga {amount} so‘m to‘lab berildi.")
+        try:
+            bot.send_message(user_id, f"Siz so‘ragan {amount} so‘m balansdan yechildi. ✅")
+        except:
+            pass
+    except:
+        bot.send_message(message.chat.id, "Buyruq formati noto‘g‘ri. Masalan: /to'la_12345678_5000")
+
 @bot.message_handler(commands=['id'])
 def show_id(message):
     bot.send_message(message.chat.id, f"ID: {message.from_user.id}")
-
-# ==== YANGI STEP-BY-STEP /withdraw BUYRUQI ====
 
 @bot.message_handler(commands=['withdraw'])
 def withdraw_command(message):
     if message.from_user.id != ADMIN_ID:
         bot.reply_to(message, "Bu buyruq faqat admin uchun.")
         return
-    
     withdraw_sessions[message.from_user.id] = {}
     msg = bot.send_message(message.chat.id, "Foydalanuvchi ID raqamini kiriting:")
     bot.register_next_step_handler(msg, process_withdraw_user_id)
@@ -180,29 +231,22 @@ def process_withdraw_amount(message):
         amount = int(message.text)
         session = withdraw_sessions.get(message.from_user.id, {})
         user_id = session.get('user_id')
-
         if user_id is None:
             bot.send_message(message.chat.id, "Avval foydalanuvchi ID kiriting.")
             return
-
         if user_balances.get(user_id, 0) < amount:
             bot.send_message(message.chat.id, "Bu foydalanuvchining balansida yetarli mablag‘ yo‘q.")
             return
-
         user_balances[user_id] -= amount
-        bot.send_message(message.chat.id, f"{user_id} balansidan {amount} so‘m yechildi. Qolgan: {user_balances[user_id]}")
-
+        bot.send_message(message.chat.id, f"{user_id} balansidan {amount} so‘m yechildi.")
         try:
             bot.send_message(user_id, f"Sizning balansingizdan {amount} so‘m yechildi.")
         except:
             pass
-
         withdraw_sessions.pop(message.from_user.id, None)
-
     except ValueError:
         bot.send_message(message.chat.id, "Miqdor noto‘g‘ri. Raqam kiriting.")
 
-# === YAKUNI ===
 print("Bot ishga tushdi...")
 keep_alive()
 bot.polling(none_stop=True)
